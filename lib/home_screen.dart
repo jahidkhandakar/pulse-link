@@ -55,6 +55,24 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             if (_error != null)
               Text(_error!, style: const TextStyle(color: Colors.red)),
+            ElevatedButton(
+              onPressed: () async {
+                final ok = await _service.requestWifiPermissions();
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      ok
+                          ? "Wi-Fi permissions granted ✅"
+                          : "Permission denied ❌",
+                    ),
+                  ),
+                );
+                await _refresh();
+              },
+              child: const Text("Enable Wi-Fi Data Access"),
+            ),
+            const SizedBox(height: 12),
             _card("Device", [
               "Name: ${s?.deviceName ?? '-'}",
               "Model: ${s?.model ?? '-'}",
@@ -66,6 +84,11 @@ class _HomeScreenState extends State<HomeScreen> {
               "Health: ${s?.batteryHealth ?? '-'}",
             ]),
             _card("Steps", ["Steps since boot: ${s?.stepsSinceBoot ?? '-'}"]),
+            _card("Wi-Fi", [
+              "SSID: ${s?.wifiSsid ?? '-'}",
+              "RSSI: ${s?.wifiRssi ?? '-'} dBm",
+              "Local IP: ${s?.localIp ?? '-'}",
+            ]),
             const SizedBox(height: 12),
             ElevatedButton(
               onPressed: () {

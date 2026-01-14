@@ -12,3 +12,12 @@
 - `MainActivity` registers a `SensorEventListener` in `onResume` and unregisters in `onPause`.
 - Latest step count (since last device boot) is cached in-memory and included in `getSnapshot()`.
 - If the device has no step counter sensor (or emulator), the field remains `null` and UI shows `-` (no mocked values).
+
+
+## Implemented: Wi-Fi SSID / RSSI / Local IP (Real Data)
+- Added Android Wi-Fi collection using `WifiManager.connectionInfo` for SSID and RSSI.
+- Implemented robust local IPv4 detection via `NetworkInterface` enumeration (avoids `0.0.0.0` cases).
+- Added runtime permission flow via MethodChannel:
+  - Requests `ACCESS_FINE_LOCATION` (required for SSID access on Android 10+).
+  - Requests `NEARBY_WIFI_DEVICES` on Android 13+.
+- If permissions are denied/unavailable, Wi-Fi fields remain `null` and UI displays `-` (no mocked data).
