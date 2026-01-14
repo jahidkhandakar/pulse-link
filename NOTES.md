@@ -30,3 +30,14 @@
   - Older APIs use `PhoneStateListener`.
 - Added runtime permission flow via MethodChannel for `READ_PHONE_STATE`.
 - If permissions are denied or device/OEM restricts signal APIs, `cellularDbm` remains `null` (no mocked values).
+
+
+## Implemented: Detected Activity (Walking / Still) via Sensors
+- Implemented activity classification using real device sensors only (no Google Play Services):
+  - Step trend from `Sensor.TYPE_STEP_COUNTER` (steps since boot) sampled over a short window.
+  - Motion signal from `Sensor.TYPE_ACCELEROMETER` using acceleration magnitude and EMA smoothing.
+- Activity label is derived from thresholds:
+  - "Walking" when recent step delta increases or motion EMA is high.
+  - "Still" when motion EMA is low (and/or no step change).
+  - `null` when no reliable sensor signal is available yet.
+- No mock values are used; the UI displays `-` when unavailable.

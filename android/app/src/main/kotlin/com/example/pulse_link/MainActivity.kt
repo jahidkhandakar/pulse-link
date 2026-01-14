@@ -24,6 +24,8 @@ import io.flutter.plugin.common.MethodChannel
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.UUID
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 class MainActivity : FlutterActivity(), SensorEventListener {
 
@@ -37,6 +39,17 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private var stepSensor: Sensor? = null
     @Volatile private var latestStepCountSinceBoot: Int? = null
 
+    // Accelerometer for activity detection
+    private var accelSensor: Sensor? = null
+    @Volatile private var latestActivityLabel: String? = null
+
+    private var lastAccelTsMs: Long = 0L
+    private var emaMotion: Double = 0.0
+
+    private var lastStepSampleTsMs: Long = 0L
+    private var lastStepSampleValue: Int? = null
+    @Volatile private var recentStepDelta: Int = 0
+
     // Wi-Fi permissions callback
     private var pendingWifiPermResult: MethodChannel.Result? = null
 
@@ -47,20 +60,18 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private var telephonyManager: TelephonyManager? = null
     @Volatile private var latestCellularDbm: Int? = null
 
-    // For API 31+ callback
     private var telephonyCallback: TelephonyCallback? = null
-
-    // For older APIs
     private var phoneStateListener: PhoneStateListener? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // Step counter sensor setup
+        // Sensors
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         stepSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+        accelSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
-        // Telephony setup
+        // Telephony
         telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
@@ -90,12 +101,15 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     override fun onResume() {
         super.onResume()
 
-        // Step sensor
+        // Step + accelerometer sensors
         stepSensor?.let { sensor ->
             sensorManager?.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)
         }
+        accelSensor?.let { sensor ->
+            sensorManager?.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME)
+        }
 
-        // Start listening for signal strength updates (best-effort)
+        // Signal strength updates (best-effort)
         startSignalStrengthListener()
     }
 
@@ -105,17 +119,81 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         stopSignalStrengthListener()
     }
 
-    // ---------- Step sensor ----------
+    // ---------- Sensors ----------
 
     override fun onSensorChanged(event: SensorEvent?) {
-        if (event?.sensor?.type == Sensor.TYPE_STEP_COUNTER) {
-            val value = event.values.firstOrNull()
-            if (value != null) latestStepCountSinceBoot = value.toInt()
+        if (event == null) return
+
+        when (event.sensor.type) {
+            Sensor.TYPE_STEP_COUNTER -> {
+                val value = event.values.firstOrNull()?.toInt()
+                if (value != null) {
+                    latestStepCountSinceBoot = value
+                    updateStepDelta(value)
+                    updateActivityLabel()
+                }
+            }
+
+            Sensor.TYPE_ACCELEROMETER -> {
+                updateMotionEma(event.values)
+                updateActivityLabel()
+            }
         }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
         // no-op
+    }
+
+    private fun updateStepDelta(currentSteps: Int) {
+        val nowMs = System.currentTimeMillis()
+
+        if (lastStepSampleTsMs == 0L) {
+            lastStepSampleTsMs = nowMs
+            lastStepSampleValue = currentSteps
+            recentStepDelta = 0
+            return
+        }
+
+        // sample window ~6 seconds
+        if (nowMs - lastStepSampleTsMs >= 6000) {
+            val prev = lastStepSampleValue ?: currentSteps
+            recentStepDelta = (currentSteps - prev).coerceAtLeast(0)
+            lastStepSampleValue = currentSteps
+            lastStepSampleTsMs = nowMs
+        }
+    }
+
+    private fun updateMotionEma(values: FloatArray) {
+        val ax = values.getOrNull(0)?.toDouble() ?: return
+        val ay = values.getOrNull(1)?.toDouble() ?: return
+        val az = values.getOrNull(2)?.toDouble() ?: return
+
+        val mag = sqrt(ax * ax + ay * ay + az * az)
+        val motion = abs(mag - 9.81) // remove gravity approx
+
+        val alpha = 0.10
+        emaMotion = alpha * motion + (1 - alpha) * emaMotion
+
+        lastAccelTsMs = System.currentTimeMillis()
+    }
+
+    private fun updateActivityLabel() {
+        val nowMs = System.currentTimeMillis()
+        val accelFresh = (nowMs - lastAccelTsMs) <= 5000
+
+        val hasSteps = latestStepCountSinceBoot != null
+
+        val walkingBySteps = hasSteps && recentStepDelta >= 3     // >= 3 steps in ~6s
+        val walkingByMotion = accelFresh && emaMotion >= 1.2      // motion threshold
+        val stillByMotion = accelFresh && emaMotion <= 0.35       // low motion
+
+        latestActivityLabel = when {
+            walkingBySteps || walkingByMotion -> "Walking"
+            stillByMotion -> "Still"
+            accelFresh || hasSteps -> "Still"
+            else -> null
+        }
     }
 
     // ---------- Snapshot ----------
@@ -131,8 +209,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         } else "Android"
 
         val wifi = readWifiInfoOrNull(ctx)
-
-        val telephony = readTelephonyInfoOrNull()
+        val tel = readTelephonyInfoOrNull()
 
         return mapOf(
             "deviceId" to deviceId,
@@ -145,16 +222,15 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             "batteryHealth" to battery.healthLabel,
 
             "stepsSinceBoot" to latestStepCountSinceBoot,
+            "activity" to latestActivityLabel,
 
             "wifiSsid" to wifi?.ssid,
             "wifiRssi" to wifi?.rssi,
             "localIp" to wifi?.localIp,
 
-            "carrierName" to telephony?.carrierName,
-            "cellularDbm" to telephony?.dbm,
-            "simState" to telephony?.simState,
-
-            "activity" to null, // next feature
+            "carrierName" to tel?.carrierName,
+            "cellularDbm" to tel?.dbm,
+            "simState" to tel?.simState,
 
             "timestamp" to java.time.Instant.now().toString()
         )
@@ -245,7 +321,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
     }
 
-    // ---------- Telephony (Carrier / SIM / dBm) ----------
+    // ---------- Telephony ----------
 
     private data class TelephonyInfo(
         val carrierName: String?,
@@ -256,7 +332,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private fun readTelephonyInfoOrNull(): TelephonyInfo? {
         val tm = telephonyManager ?: return null
 
-        // Carrier name is often available without permission, but we’ll still allow null if tm blocks it.
         val carrier = try { tm.networkOperatorName } catch (_: Exception) { null }
 
         val simState = try {
@@ -271,11 +346,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 TelephonyManager.SIM_STATE_UNKNOWN -> "UNKNOWN"
                 else -> "UNKNOWN"
             }
-        } catch (_: Exception) {
-            null
-        }
+        } catch (_: Exception) { null }
 
-        // Signal strength can be restricted; we return best-effort latest value (or null)
         val dbm = if (hasPhonePermissions()) latestCellularDbm else null
 
         return TelephonyInfo(
@@ -291,7 +363,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                // API 31+ TelephonyCallback
                 if (telephonyCallback == null) {
                     telephonyCallback = object : TelephonyCallback(), TelephonyCallback.SignalStrengthsListener {
                         override fun onSignalStrengthsChanged(signalStrength: SignalStrength) {
@@ -301,7 +372,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 }
                 tm.registerTelephonyCallback(mainExecutor, telephonyCallback as TelephonyCallback)
             } else {
-                // Older APIs: PhoneStateListener
                 if (phoneStateListener == null) {
                     phoneStateListener = object : PhoneStateListener() {
                         override fun onSignalStrengthsChanged(signalStrength: SignalStrength?) {
@@ -315,7 +385,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 tm.listen(phoneStateListener, PhoneStateListener.LISTEN_SIGNAL_STRENGTHS)
             }
         } catch (_: Exception) {
-            // If blocked by device/OEM policy, we keep dbm null
+            // Some OEMs restrict this; keep null
         }
     }
 
@@ -333,7 +403,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     private fun extractDbm(signalStrength: SignalStrength): Int? {
         return try {
-            // Works across LTE/NR/WCDMA/GSM; pick first available
             val cells = signalStrength.cellSignalStrengths
             if (cells.isNullOrEmpty()) return null
             val dbm = cells[0].dbm
@@ -360,12 +429,13 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     }
 
     private fun requestWifiPermissions(result: MethodChannel.Result) {
-        if (hasWifiPermissions()) {
-            result.success(true); return
-        }
+        if (hasWifiPermissions()) { result.success(true); return }
+
         if (pendingWifiPermResult != null) {
-            result.error("PERM_IN_PROGRESS", "Wi-Fi permission request already running", null); return
+            result.error("PERM_IN_PROGRESS", "Wi-Fi permission request already running", null)
+            return
         }
+
         pendingWifiPermResult = result
 
         val perms = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -381,12 +451,13 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     }
 
     private fun requestPhonePermissions(result: MethodChannel.Result) {
-        if (hasPhonePermissions()) {
-            result.success(true); return
-        }
+        if (hasPhonePermissions()) { result.success(true); return }
+
         if (pendingPhonePermResult != null) {
-            result.error("PERM_IN_PROGRESS", "Phone permission request already running", null); return
+            result.error("PERM_IN_PROGRESS", "Phone permission request already running", null)
+            return
         }
+
         pendingPhonePermResult = result
 
         ActivityCompat.requestPermissions(

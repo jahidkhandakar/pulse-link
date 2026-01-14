@@ -66,6 +66,11 @@ class _HomeScreenState extends State<HomeScreen> {
               "Health: ${s?.batteryHealth ?? '-'}",
             ]),
             _card("Steps", ["Steps since boot: ${s?.stepsSinceBoot ?? '-'}"]),
+            _card("Wi-Fi", [
+              "SSID: ${s?.wifiSsid ?? '-'}",
+              "RSSI: ${s?.wifiRssi ?? '-'} dBm",
+              "Local IP: ${s?.localIp ?? '-'}",
+            ]),
             //---------------Elevated Button for Wifi---------------
             ElevatedButton(
               onPressed: () async {
@@ -85,10 +90,10 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Text("Enable Wi-Fi Data Access"),
             ),
             const SizedBox(height: 12),
-            _card("Wi-Fi", [
-              "SSID: ${s?.wifiSsid ?? '-'}",
-              "RSSI: ${s?.wifiRssi ?? '-'} dBm",
-              "Local IP: ${s?.localIp ?? '-'}",
+            _card("Cellular", [
+              "Carrier: ${s?.carrierName ?? '-'}",
+              "SIM: ${s?.simState ?? '-'}",
+              "Signal: ${s?.cellularDbm ?? '-'} dBm",
             ]),
             //--------------Elevated Button for Cellular---------------
             ElevatedButton(
@@ -108,14 +113,10 @@ class _HomeScreenState extends State<HomeScreen> {
               },
               child: const Text("Enable Carrier & Signal Data"),
             ),
-            const SizedBox(height: 24),
-            _card("Cellular", [
-              "Carrier: ${s?.carrierName ?? '-'}",
-              "SIM: ${s?.simState ?? '-'}",
-              "Signal: ${s?.cellularDbm ?? '-'} dBm",
-            ]),
-
             const SizedBox(height: 12),
+            _card("Activity", ["Detected: ${s?.activity ?? '-'}"]),
+            const SizedBox(height: 20),
+            //--------------Elevated Button for Share My Pulse---------------
             ElevatedButton(
               onPressed: () {
                 // Next feature: open share screen
