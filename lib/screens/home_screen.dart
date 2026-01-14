@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:pulse_link/share_screen.dart';
-import '../models/device_snapshot.dart';
+import 'package:pulse_link/models/device_snapshot.dart';
+import 'package:pulse_link/platform/native_network_service.dart';
+import 'package:pulse_link/screens/received_screen.dart';
+import 'package:pulse_link/storage/received_store.dart';
 import '../platform/native_device_service.dart';
+import 'share_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -11,6 +14,11 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  final _net = NativeNetworkService();
+  final _store = ReceivedStore();
+  StreamSubscription<String>? _rxSub;
+  bool _netStarted = false;
+
   final _service = NativeDeviceService();
   DeviceSnapshot? _snap;
   Timer? _timer;
@@ -21,6 +29,22 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _refresh();
     _timer = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
+    _bootNetworking();
+  }
+
+  Future<void> _bootNetworking() async {
+    if (_netStarted) return;
+    _netStarted = true;
+
+    await _net.startNetworking();
+
+    _rxSub = _net.receivedJsonStream.listen((jsonStr) async {
+      try {
+        await _store.addRaw(jsonStr);
+      } catch (_) {
+        // ignore
+      }
+    });
   }
 
   Future<void> _refresh() async {
@@ -40,6 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _rxSub?.cancel();
     super.dispose();
   }
 
@@ -127,6 +152,16 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Text("Share My Pulse"),
             ),
             const SizedBox(height: 12),
+            //-------------Elevated Button for Received Screen-----------
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ReceivedScreen()),
+                );
+              },
+              child: const Text("Received Data"),
+            ),
+            const SizedBox(height: 14),
             const Text(
               "More sensors (Steps, Activity, Wi-Fi, Carrier) will appear here next.",
               style: TextStyle(color: Colors.grey),

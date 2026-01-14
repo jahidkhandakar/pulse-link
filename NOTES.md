@@ -54,3 +54,17 @@
 - Receiving:
   - TCP server reads incoming JSON payload and forwards it to Flutter via `EventChannel` (`com.pulselink/events/received`).
 - Peer list updates are streamed to Flutter via `EventChannel` (`com.pulselink/events/peers`).
+
+
+## Implemented: Received Data Screen + Persistence (Hive)
+- Added Hive (`hive` + `hive_flutter`) for local persistence of received device snapshots.
+- Stored received snapshots as raw JSON strings in a Hive box (`received_snapshots`) to avoid adapter/codegen and keep implementation robust.
+- App starts local networking on launch and subscribes to native `EventChannel` receive stream.
+- On each received payload:
+  - Persisted into Hive immediately (no mock data).
+  - UI updates automatically via `ValueListenableBuilder`.
+- Implemented `ReceivedScreen`:
+  - Shows list of recent snapshots (newest first).
+  - Tap item opens a detail view displaying full JSON.
+  - Includes “Clear history” action.
+- Added optional cap (e.g., 200 items) to prevent unbounded storage growth.

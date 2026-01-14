@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:pulse_link/home_screen.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'screens/home_screen.dart';
 
-void main() => runApp(const MyApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Hive.initFlutter();
+  await Hive.openBox<String>('received_snapshots'); // stores JSON strings
+  runApp(const MyApp());
+}
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
