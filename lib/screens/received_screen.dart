@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
-
 import '../models/device_snapshot.dart';
 import '../storage/received_store.dart';
 

@@ -1,16 +1,46 @@
-# pulse_link
+# PulseLink (Flutter + Android)
 
-A new Flutter project.
+PulseLink is a Flutter-based Android application that collects **real, live device and sensor data** and enables **instant peer-to-peer sharing** with nearby devices on the same Wi-Fi network — without servers, cloud services, or mocked values.
 
-## Getting Started
+This project was built as a technical assessment to demonstrate native Android integrations, sensor handling, and local networking using Flutter.
 
-This project is a starting point for a Flutter application.
+---
 
-A few resources to get you started if this is your first Flutter project:
+## Key Features
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+### Live Device Snapshot (Real Data Only)
+- Device info: name, model, Android version
+- Battery: level (%), temperature (°C), health status
+- Steps since last device boot (hardware step counter)
+- Activity detection: **Walking / Still**
+- Wi-Fi: SSID, RSSI, local IPv4 address
+- Cellular: carrier name, SIM state, signal strength (dBm, best-effort)
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+> No mock or simulated data is used.  
+> If a value is unavailable, the UI shows `-`.
+
+---
+
+### Local Peer Discovery & Sharing
+- Automatic peer discovery on the same Wi-Fi using **Android NSD (mDNS/DNS-SD)**
+- Direct **TCP socket** communication (no servers, no manual IPs)
+- Tap a peer → instantly send your current snapshot
+- Incoming snapshots are received in real time
+
+---
+
+### Received Data History
+- Incoming snapshots are persisted locally using **Hive**
+- Data survives app restarts
+- View recent snapshots (newest first)
+- Tap any item to inspect the full JSON payload
+- Optional history cap to avoid unbounded storage growth
+
+---
+
+## How to Run
+
+1. Clone the repository
+2. Run:
+   ```bash
+   flutter pub get

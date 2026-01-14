@@ -110,7 +110,7 @@ class _ShareScreenState extends State<ShareScreen> {
                   return Card(
                     child: ListTile(
                       title: Text(peer.serviceName),
-                      subtitle: Text("${peer.host}:${peer.port}"),
+                      subtitle: Text(peer.endpoint),
                       trailing: _sending
                           ? const SizedBox(
                               width: 18,

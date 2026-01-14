@@ -98,7 +98,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() => _wifiPermOk = ok);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(ok ? "Wi-Fi permissions granted ✅" : "Wi-Fi permission denied ❌")),
+      SnackBar(
+        content: Text(
+          ok ? "Wi-Fi permissions granted ✅" : "Wi-Fi permission denied ❌",
+        ),
+      ),
     );
     await _refresh();
   }
@@ -109,7 +113,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() => _phonePermOk = ok);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(ok ? "Phone permission granted ✅" : "Phone permission denied ❌")),
+      SnackBar(
+        content: Text(
+          ok ? "Phone permission granted ✅" : "Phone permission denied ❌",
+        ),
+      ),
     );
     await _refresh();
   }
@@ -133,9 +141,9 @@ class _HomeScreenState extends State<HomeScreen> {
             tooltip: "Received Data",
             icon: const Icon(Icons.inbox_outlined),
             onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ReceivedScreen()),
-              );
+              Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const ReceivedScreen()));
             },
           ),
         ],
@@ -165,13 +173,9 @@ class _HomeScreenState extends State<HomeScreen> {
               "Health: ${s?.batteryHealth ?? '-'}",
             ]),
 
-            _card("Steps", [
-              "Steps since boot: ${s?.stepsSinceBoot ?? '-'}",
-            ]),
+            _card("Steps", ["Steps since boot: ${s?.stepsSinceBoot ?? '-'}"]),
 
-            _card("Activity", [
-              "Detected: ${s?.activity ?? '-'}",
-            ]),
+            _card("Activity", ["Detected: ${s?.activity ?? '-'}"]),
 
             _card("Wi-Fi", [
               "SSID: ${s?.wifiSsid ?? '-'}",
@@ -200,32 +204,40 @@ class _HomeScreenState extends State<HomeScreen> {
 
             const SizedBox(height: 20),
 
-            ElevatedButton.icon(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ShareScreen()),
-                );
-              },
-              icon: const Icon(Icons.share),
-              label: const Text("Share My Pulse"),
-            ),
+            //Buttons
+            Row(
+              children: [
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const ShareScreen()),
+                    );
+                  },
+                  icon: const Icon(Icons.share),
+                  label: const Text("Share My Pulse"),
+                ),
 
-            const SizedBox(height: 12),
+                const SizedBox(width: 12),
 
-            OutlinedButton.icon(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ReceivedScreen()),
-                );
-              },
-              icon: const Icon(Icons.history),
-              label: const Text("Received Data"),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const ReceivedScreen()),
+                    );
+                  },
+                  icon: const Icon(Icons.history),
+                  label: const Text("Received Data"),
+                ),
+              ],
             ),
 
             const SizedBox(height: 14),
-            const Text(
-              "If some fields show '-', it usually means permissions are missing or the device/OEM restricts access.",
-              style: TextStyle(color: Colors.grey),
+            SizedBox(
+              width: double.infinity,
+              child: const Text(
+                "NB: If some fields show '-', it usually means permissions are missing or the device/OEM restricts access.",
+                style: TextStyle(color: Colors.grey),
+              ),
             ),
           ],
         ),
@@ -233,6 +245,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  //*_________________Widgets_________________*//
   Widget _permChips() {
     return Wrap(
       spacing: 8,
@@ -247,7 +260,9 @@ class _HomeScreenState extends State<HomeScreen> {
           label: Text("Phone: ${_phonePermOk ? "OK" : "NO"}"),
         ),
         Chip(
-          avatar: Icon(_networkBooted ? Icons.check_circle : Icons.hourglass_empty),
+          avatar: Icon(
+            _networkBooted ? Icons.check_circle : Icons.hourglass_empty,
+          ),
           label: Text("Networking: ${_networkBooted ? "ON" : "OFF"}"),
         ),
       ],
@@ -266,7 +281,9 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           const Icon(Icons.error_outline, color: Colors.red),
           const SizedBox(width: 10),
-          Expanded(child: Text(text, style: const TextStyle(color: Colors.red))),
+          Expanded(
+            child: Text(text, style: const TextStyle(color: Colors.red)),
+          ),
         ],
       ),
     );

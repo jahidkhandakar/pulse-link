@@ -1,53 +1,55 @@
 # Technical Decisions – PulseLink
 
-This document explains key architectural and technical decisions made during development, along with known limitations.
+This document outlines key architectural decisions and known limitations.
 
 ---
 
 ## Platform Scope
-- Target platform: **Android**
-- Reason: The task requires deep access to Android-specific sensors and networking APIs.
+- Target platform: **Android only**
+
+**Reason:**  
+The task requires direct access to Android-specific sensors, telephony APIs, and local networking features that are not consistently available across platforms.
 
 ---
 
 ## Android SDK Configuration
 - **minSdkVersion:** 21  
-- **targetSdkVersion:** 35  
-- **compileSdkVersion:** 35  
+- **targetSdkVersion:** 36  
+- **compileSdkVersion:** 36  
 
 **Rationale:**  
 minSdk 21 ensures compatibility with required sensors and networking APIs.  
-targetSdk and compileSdk 35 align with modern Android security and Google Play requirements.
+targetSdk and compileSdk 35 align with modern Android security and Play Store requirements.
 
 ---
 
 ## Data Collection Strategy
-All device and health data is collected using **Android native APIs** via Flutter `MethodChannel`.
+All data is collected using **native Android APIs** via Flutter `MethodChannel`.
 
 **Examples:**
-- Battery status: `BatteryManager`
-- Step count: `Sensor.TYPE_STEP_COUNTER`
-- Activity detection: Android Activity Recognition APIs
-- Wi-Fi info: `WifiManager`, `ConnectivityManager`
-- Carrier & signal: `TelephonyManager`
+- Battery: `BatteryManager`, `ACTION_BATTERY_CHANGED`
+- Steps: `Sensor.TYPE_STEP_COUNTER`
+- Activity: Accelerometer + step trend analysis
+- Wi-Fi: `WifiManager`, `NetworkInterface`
+- Telephony: `TelephonyManager`
 
-No mock or simulated data is used.
+No mock or simulated values are used.
 
 ---
 
-## Local Network Discovery
+## Peer Discovery & Networking
 - **Approach:** Android Network Service Discovery (NSD / mDNS)
-- **Protocol:** TCP sockets over local Wi-Fi
+- **Transport:** TCP sockets over local Wi-Fi
 
 **Rationale:**  
-NSD enables automatic peer discovery on the same Wi-Fi network without requiring manual IP entry or external servers.
+NSD enables zero-configuration peer discovery without manual IP entry or external infrastructure.
 
 ---
 
 ## Data Sharing
-- Device snapshots are serialized as JSON.
-- Data is transmitted directly peer-to-peer using TCP sockets.
-- No relay servers, cloud services, or third-party networking frameworks are used.
+- Snapshots serialized as JSON.
+- Direct peer-to-peer transmission via TCP.
+- No cloud services, relays, or third-party networking frameworks.
 
 ---
 
@@ -55,14 +57,14 @@ NSD enables automatic peer discovery on the same Wi-Fi network without requiring
 - **Chosen solution:** Hive
 
 **Rationale:**  
-Hive provides fast, lightweight local storage for structured data with minimal boilerplate.  
-It is well-suited for persisting received device snapshots across app restarts.
+Hive is lightweight, fast, and well-suited for storing structured data locally with minimal boilerplate.  
+It avoids database schema complexity for this use case.
 
 ---
 
 ## Limitations & Notes
-- Some telephony signal metrics may be restricted on certain Android versions or devices.
-- Activity recognition availability depends on device support and user permissions.
-- Wi-Fi SSID access requires location permission on Android 10+.
+- Cellular signal strength may be restricted by Android version or OEM implementation.
+- Activity detection accuracy depends on available sensors and device motion.
+- Wi-Fi SSID access requires location permission and location services enabled on Android 10+.
 
-These constraints are documented and handled gracefully in the UI.
+All limitations are handled gracefully and reflected transparently in the UI.
