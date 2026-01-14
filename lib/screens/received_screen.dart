@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
+
 import '../models/device_snapshot.dart';
 import '../storage/received_store.dart';
 
@@ -16,6 +17,7 @@ class ReceivedScreen extends StatelessWidget {
         title: const Text("Received Snapshots"),
         actions: [
           IconButton(
+            tooltip: "Clear history",
             icon: const Icon(Icons.delete_outline),
             onPressed: () async {
               await store.clear();
@@ -25,7 +27,7 @@ class ReceivedScreen extends StatelessWidget {
                 );
               }
             },
-          )
+          ),
         ],
       ),
       body: ValueListenableBuilder<Box<String>>(
@@ -35,7 +37,10 @@ class ReceivedScreen extends StatelessWidget {
 
           if (items.isEmpty) {
             return const Center(
-              child: Text("No received snapshots yet.\nOpen Share on another device and send one."),
+              child: Text(
+                "No received snapshots yet.\nOpen Share on another device and send one.",
+                textAlign: TextAlign.center,
+              ),
             );
           }
 
@@ -44,31 +49,29 @@ class ReceivedScreen extends StatelessWidget {
             itemCount: items.length,
             itemBuilder: (context, i) {
               final raw = items[i];
-              DeviceSnapshot? snap;
 
+              DeviceSnapshot? snap;
               try {
                 final map = jsonDecode(raw) as Map<String, dynamic>;
                 snap = DeviceSnapshot.fromJson(map);
-              } catch (_) {
-                // ignore parse errors (still show raw)
-              }
+              } catch (_) {}
+
+              final title = snap?.deviceName ?? "Unknown Device";
+              final time = snap?.timestamp.toLocal().toString().split('.').first ?? "-";
+
+              final summary = [
+                if (snap?.batteryLevel != null) "🔋 ${snap!.batteryLevel}%",
+                if (snap?.activity != null) "🏃 ${snap!.activity}",
+                if (snap?.wifiSsid != null) "📶 ${snap!.wifiSsid}",
+                if (snap?.carrierName != null) "📡 ${snap!.carrierName}",
+              ].join("  ");
 
               return Card(
                 child: ListTile(
-                  title: Text(snap?.deviceName ?? "Unknown Device"),
-                  subtitle: Text(
-                    [
-                      if (snap?.model != null) "Model: ${snap!.model}",
-                      if (snap?.batteryLevel != null) "Battery: ${snap!.batteryLevel}%",
-                      if (snap?.stepsSinceBoot != null) "Steps: ${snap!.stepsSinceBoot}",
-                      if (snap?.activity != null) "Activity: ${snap!.activity}",
-                      if (snap?.wifiSsid != null) "Wi-Fi: ${snap!.wifiSsid}",
-                      if (snap?.carrierName != null) "Carrier: ${snap!.carrierName}",
-                      "Time: ${snap?.timestamp.toLocal().toString() ?? "-"}",
-                    ].join(" • "),
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  title: Text(title),
+                  subtitle: Text(summary.isEmpty ? "Tap to view JSON" : summary,
+                      maxLines: 2, overflow: TextOverflow.ellipsis),
+                  trailing: Text(time, style: const TextStyle(color: Colors.grey, fontSize: 12)),
                   onTap: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
@@ -97,13 +100,17 @@ class _ReceivedDetailScreen extends StatelessWidget {
       map = jsonDecode(rawJson) as Map<String, dynamic>;
     } catch (_) {}
 
+    final pretty = map != null
+        ? const JsonEncoder.withIndent("  ").convert(map)
+        : rawJson;
+
     return Scaffold(
       appBar: AppBar(title: const Text("Snapshot Details")),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: SingleChildScrollView(
-          child: Text(
-            map != null ? const JsonEncoder.withIndent("  ").convert(map) : rawJson,
+          child: SelectableText(
+            pretty,
             style: const TextStyle(fontFamily: "monospace"),
           ),
         ),
