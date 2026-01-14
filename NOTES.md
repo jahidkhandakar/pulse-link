@@ -41,3 +41,16 @@
   - "Still" when motion EMA is low (and/or no step change).
   - `null` when no reliable sensor signal is available yet.
 - No mock values are used; the UI displays `-` when unavailable.
+
+
+## Implemented: Local Peer Discovery + Sharing (NSD/mDNS + TCP)
+- Added peer-to-peer networking without servers using Android NSD (mDNS/DNS-SD) on the same Wi-Fi network.
+- Each device:
+  - Starts a local TCP server on an ephemeral port.
+  - Registers `_pulselink._tcp.` service via NSD with service name `PulseLink-<deviceId>`.
+  - Discovers and resolves other services to obtain peer IP + port automatically (no manual IP entry).
+- Sending:
+  - Flutter sends current snapshot JSON to selected peer over TCP.
+- Receiving:
+  - TCP server reads incoming JSON payload and forwards it to Flutter via `EventChannel` (`com.pulselink/events/received`).
+- Peer list updates are streamed to Flutter via `EventChannel` (`com.pulselink/events/peers`).

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:pulse_link/share_screen.dart';
 import '../models/device_snapshot.dart';
 import '../platform/native_device_service.dart';
 
@@ -119,7 +120,9 @@ class _HomeScreenState extends State<HomeScreen> {
             //--------------Elevated Button for Share My Pulse---------------
             ElevatedButton(
               onPressed: () {
-                // Next feature: open share screen
+                Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => ShareScreen()));
               },
               child: const Text("Share My Pulse"),
             ),

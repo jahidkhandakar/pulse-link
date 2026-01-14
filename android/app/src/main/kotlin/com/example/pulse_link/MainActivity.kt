@@ -20,48 +20,81 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.net.Inet4Address
+import java.net.InetAddress
 import java.net.NetworkInterface
+import java.net.ServerSocket
+import java.net.Socket
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.concurrent.thread
 import kotlin.math.abs
 import kotlin.math.sqrt
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
 
 class MainActivity : FlutterActivity(), SensorEventListener {
 
-    private val CHANNEL = "com.pulselink/native"
+    // -------- Channels --------
+    private val METHOD_CH = "com.pulselink/native"
+    private val RECEIVED_EVENTS_CH = "com.pulselink/events/received"
+    private val PEERS_EVENTS_CH = "com.pulselink/events/peers"
 
+    // -------- Permission request codes --------
     private val REQ_WIFI_PERMS = 1001
     private val REQ_PHONE_PERMS = 1002
 
-    // Step sensor
+    // -------- Sensors --------
     private var sensorManager: SensorManager? = null
     private var stepSensor: Sensor? = null
     @Volatile private var latestStepCountSinceBoot: Int? = null
 
-    // Accelerometer for activity detection
     private var accelSensor: Sensor? = null
     @Volatile private var latestActivityLabel: String? = null
-
     private var lastAccelTsMs: Long = 0L
     private var emaMotion: Double = 0.0
-
     private var lastStepSampleTsMs: Long = 0L
     private var lastStepSampleValue: Int? = null
     @Volatile private var recentStepDelta: Int = 0
 
-    // Wi-Fi permissions callback
+    // -------- Permissions result holders --------
     private var pendingWifiPermResult: MethodChannel.Result? = null
-
-    // Phone permissions callback
     private var pendingPhonePermResult: MethodChannel.Result? = null
 
-    // Telephony
+    // -------- Telephony --------
     private var telephonyManager: TelephonyManager? = null
     @Volatile private var latestCellularDbm: Int? = null
-
     private var telephonyCallback: TelephonyCallback? = null
     private var phoneStateListener: PhoneStateListener? = null
+
+    // -------- Device ID --------
+    private var cachedDeviceId: String? = null
+
+    // -------- Networking (NSD + TCP) --------
+    private var nsdManager: NsdManager? = null
+    private var serverSocket: ServerSocket? = null
+    @Volatile private var serverPort: Int? = null
+    @Volatile private var isServerRunning: Boolean = false
+
+    private var registrationListener: NsdManager.RegistrationListener? = null
+    private var discoveryListener: NsdManager.DiscoveryListener? = null
+
+    // peers: key = serviceName, value = Peer(serviceName, host, port)
+    private val peers = ConcurrentHashMap<String, Peer>()
+
+    data class Peer(
+        val serviceName: String,
+        val host: String,
+        val port: Int
+    )
+
+    // -------- Event sinks --------
+    private var receivedSink: EventChannel.EventSink? = null
+    private var peersSink: EventChannel.EventSink? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -74,24 +107,70 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         // Telephony
         telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        // NSD
+        nsdManager = getSystemService(Context.NSD_SERVICE) as NsdManager
+
+        // Event channels
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, RECEIVED_EVENTS_CH)
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    receivedSink = events
+                }
+                override fun onCancel(arguments: Any?) {
+                    receivedSink = null
+                }
+            })
+
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, PEERS_EVENTS_CH)
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    peersSink = events
+                    pushPeersUpdate()
+                }
+                override fun onCancel(arguments: Any?) {
+                    peersSink = null
+                }
+            })
+
+        // Method channel
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CH)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    // Snapshot
                     "getSnapshot" -> {
-                        try {
-                            result.success(getSnapshot())
-                        } catch (e: Exception) {
-                            result.error("SNAPSHOT_ERROR", e.message, null)
-                        }
+                        try { result.success(getSnapshot()) }
+                        catch (e: Exception) { result.error("SNAPSHOT_ERROR", e.message, null) }
                     }
 
-                    // Wi-Fi permission bridge
+                    // Permissions
                     "hasWifiPermissions" -> result.success(hasWifiPermissions())
                     "requestWifiPermissions" -> requestWifiPermissions(result)
 
-                    // Phone permission bridge
                     "hasPhonePermissions" -> result.success(hasPhonePermissions())
                     "requestPhonePermissions" -> requestPhonePermissions(result)
+
+                    // Networking
+                    "startNetworking" -> {
+                        startNetworking()
+                        result.success(true)
+                    }
+                    "stopNetworking" -> {
+                        stopNetworking()
+                        result.success(true)
+                    }
+                    "getPeers" -> {
+                        result.success(getPeersAsList())
+                    }
+                    "sendSnapshotToPeer" -> {
+                        val serviceName = call.argument<String>("serviceName")
+                        val payload = call.argument<String>("payloadJson")
+                        if (serviceName.isNullOrBlank() || payload.isNullOrBlank()) {
+                            result.error("BAD_ARGS", "serviceName/payloadJson required", null)
+                        } else {
+                            val ok = sendToPeer(serviceName, payload)
+                            result.success(ok)
+                        }
+                    }
 
                     else -> result.notImplemented()
                 }
@@ -101,7 +180,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     override fun onResume() {
         super.onResume()
 
-        // Step + accelerometer sensors
         stepSensor?.let { sensor ->
             sensorManager?.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)
         }
@@ -109,7 +187,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             sensorManager?.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME)
         }
 
-        // Signal strength updates (best-effort)
         startSignalStrengthListener()
     }
 
@@ -119,11 +196,10 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         stopSignalStrengthListener()
     }
 
-    // ---------- Sensors ----------
+    // ---------------- Sensors ----------------
 
     override fun onSensorChanged(event: SensorEvent?) {
         if (event == null) return
-
         when (event.sensor.type) {
             Sensor.TYPE_STEP_COUNTER -> {
                 val value = event.values.firstOrNull()?.toInt()
@@ -133,7 +209,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     updateActivityLabel()
                 }
             }
-
             Sensor.TYPE_ACCELEROMETER -> {
                 updateMotionEma(event.values)
                 updateActivityLabel()
@@ -141,21 +216,16 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
     }
 
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-        // no-op
-    }
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     private fun updateStepDelta(currentSteps: Int) {
         val nowMs = System.currentTimeMillis()
-
         if (lastStepSampleTsMs == 0L) {
             lastStepSampleTsMs = nowMs
             lastStepSampleValue = currentSteps
             recentStepDelta = 0
             return
         }
-
-        // sample window ~6 seconds
         if (nowMs - lastStepSampleTsMs >= 6000) {
             val prev = lastStepSampleValue ?: currentSteps
             recentStepDelta = (currentSteps - prev).coerceAtLeast(0)
@@ -170,7 +240,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         val az = values.getOrNull(2)?.toDouble() ?: return
 
         val mag = sqrt(ax * ax + ay * ay + az * az)
-        val motion = abs(mag - 9.81) // remove gravity approx
+        val motion = abs(mag - 9.81)
 
         val alpha = 0.10
         emaMotion = alpha * motion + (1 - alpha) * emaMotion
@@ -183,10 +253,9 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         val accelFresh = (nowMs - lastAccelTsMs) <= 5000
 
         val hasSteps = latestStepCountSinceBoot != null
-
-        val walkingBySteps = hasSteps && recentStepDelta >= 3     // >= 3 steps in ~6s
-        val walkingByMotion = accelFresh && emaMotion >= 1.2      // motion threshold
-        val stillByMotion = accelFresh && emaMotion <= 0.35       // low motion
+        val walkingBySteps = hasSteps && recentStepDelta >= 3
+        val walkingByMotion = accelFresh && emaMotion >= 1.2
+        val stillByMotion = accelFresh && emaMotion <= 0.35
 
         latestActivityLabel = when {
             walkingBySteps || walkingByMotion -> "Walking"
@@ -196,7 +265,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
     }
 
-    // ---------- Snapshot ----------
+    // ---------------- Snapshot ----------------
 
     @SuppressLint("HardwareIds")
     private fun getSnapshot(): Map<String, Any?> {
@@ -236,13 +305,9 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         )
     }
 
-    // ---------- Battery ----------
+    // ---------------- Battery ----------------
 
-    private data class BatteryInfo(
-        val level: Int,
-        val tempC: Double,
-        val healthLabel: String
-    )
+    private data class BatteryInfo(val level: Int, val tempC: Double, val healthLabel: String)
 
     private fun readBattery(ctx: Context): BatteryInfo {
         val bm = ctx.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
@@ -251,11 +316,9 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     }
 
     private fun getBatteryFromIntent(ctx: Context, levelFallback: Int): BatteryInfo {
-        val intent = ctx.registerReceiver(
-            null,
+        val intent = ctx.registerReceiver(null,
             android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)
         )
-
         val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, levelFallback) ?: levelFallback
         val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, 100) ?: 100
         val levelPct = ((level.toDouble() / scale.toDouble()) * 100.0).toInt()
@@ -268,22 +331,17 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             BatteryManager.BATTERY_HEALTH_UNKNOWN
         ) ?: BatteryManager.BATTERY_HEALTH_UNKNOWN
 
-        val healthLabel = when (health) {
+        val label = when (health) {
             BatteryManager.BATTERY_HEALTH_GOOD -> "Good"
             BatteryManager.BATTERY_HEALTH_OVERHEAT -> "Overheat"
             else -> "Unknown"
         }
-
-        return BatteryInfo(levelPct, tempC, healthLabel)
+        return BatteryInfo(levelPct, tempC, label)
     }
 
-    // ---------- Wi-Fi ----------
+    // ---------------- Wi-Fi ----------------
 
-    private data class WifiInfo(
-        val ssid: String?,
-        val rssi: Int?,
-        val localIp: String?
-    )
+    private data class WifiInfo(val ssid: String?, val rssi: Int?, val localIp: String?)
 
     private fun readWifiInfoOrNull(ctx: Context): WifiInfo? {
         if (!hasWifiPermissions()) return null
@@ -294,13 +352,11 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         val rawSsid = info?.ssid
         val ssid = rawSsid
             ?.takeIf { it.isNotBlank() && it != "<unknown ssid>" }
-            ?.removePrefix("\"")
-            ?.removeSuffix("\"")
+            ?.removePrefix("\"")?.removeSuffix("\"")
 
         val rssi = info?.rssi
         val ip = getLocalIpv4Address()
-
-        return WifiInfo(ssid = ssid, rssi = rssi, localIp = ip)
+        return WifiInfo(ssid, rssi, ip)
     }
 
     private fun getLocalIpv4Address(): String? {
@@ -316,18 +372,12 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 }
             }
             null
-        } catch (e: Exception) {
-            null
-        }
+        } catch (_: Exception) { null }
     }
 
-    // ---------- Telephony ----------
+    // ---------------- Telephony ----------------
 
-    private data class TelephonyInfo(
-        val carrierName: String?,
-        val simState: String?,
-        val dbm: Int?
-    )
+    private data class TelephonyInfo(val carrierName: String?, val simState: String?, val dbm: Int?)
 
     private fun readTelephonyInfoOrNull(): TelephonyInfo? {
         val tm = telephonyManager ?: return null
@@ -360,7 +410,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private fun startSignalStrengthListener() {
         val tm = telephonyManager ?: return
         if (!hasPhonePermissions()) return
-
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 if (telephonyCallback == null) {
@@ -375,18 +424,14 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 if (phoneStateListener == null) {
                     phoneStateListener = object : PhoneStateListener() {
                         override fun onSignalStrengthsChanged(signalStrength: SignalStrength?) {
-                            if (signalStrength != null) {
-                                latestCellularDbm = extractDbm(signalStrength)
-                            }
+                            if (signalStrength != null) latestCellularDbm = extractDbm(signalStrength)
                         }
                     }
                 }
                 @Suppress("DEPRECATION")
                 tm.listen(phoneStateListener, PhoneStateListener.LISTEN_SIGNAL_STRENGTHS)
             }
-        } catch (_: Exception) {
-            // Some OEMs restrict this; keep null
-        }
+        } catch (_: Exception) {}
     }
 
     private fun stopSignalStrengthListener() {
@@ -404,62 +449,46 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private fun extractDbm(signalStrength: SignalStrength): Int? {
         return try {
             val cells = signalStrength.cellSignalStrengths
-            if (cells.isNullOrEmpty()) return null
-            val dbm = cells[0].dbm
-            if (dbm == Int.MAX_VALUE) null else dbm
-        } catch (_: Exception) {
-            null
-        }
+            if (cells.isNullOrEmpty()) null else cells[0].dbm
+        } catch (_: Exception) { null }
     }
 
-    // ---------- Permissions ----------
+    // ---------------- Permissions ----------------
 
     private fun hasWifiPermissions(): Boolean {
-        val hasFineLocation = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
+        val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
 
-        val hasNearbyWifi = if (Build.VERSION.SDK_INT >= 33) {
-            ContextCompat.checkSelfPermission(
-                this, Manifest.permission.NEARBY_WIFI_DEVICES
-            ) == PackageManager.PERMISSION_GRANTED
+        val nearby = if (Build.VERSION.SDK_INT >= 33) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) ==
+                    PackageManager.PERMISSION_GRANTED
         } else true
 
-        return hasFineLocation && hasNearbyWifi
+        return fine && nearby
     }
 
     private fun requestWifiPermissions(result: MethodChannel.Result) {
         if (hasWifiPermissions()) { result.success(true); return }
-
         if (pendingWifiPermResult != null) {
-            result.error("PERM_IN_PROGRESS", "Wi-Fi permission request already running", null)
-            return
+            result.error("PERM_IN_PROGRESS", "Wi-Fi permission request already running", null); return
         }
-
         pendingWifiPermResult = result
-
         val perms = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION)
         if (Build.VERSION.SDK_INT >= 33) perms.add(Manifest.permission.NEARBY_WIFI_DEVICES)
-
         ActivityCompat.requestPermissions(this, perms.toTypedArray(), REQ_WIFI_PERMS)
     }
 
     private fun hasPhonePermissions(): Boolean {
-        return ContextCompat.checkSelfPermission(
-            this, Manifest.permission.READ_PHONE_STATE
-        ) == PackageManager.PERMISSION_GRANTED
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) ==
+                PackageManager.PERMISSION_GRANTED
     }
 
     private fun requestPhonePermissions(result: MethodChannel.Result) {
         if (hasPhonePermissions()) { result.success(true); return }
-
         if (pendingPhonePermResult != null) {
-            result.error("PERM_IN_PROGRESS", "Phone permission request already running", null)
-            return
+            result.error("PERM_IN_PROGRESS", "Phone permission request already running", null); return
         }
-
         pendingPhonePermResult = result
-
         ActivityCompat.requestPermissions(
             this,
             arrayOf(Manifest.permission.READ_PHONE_STATE),
@@ -489,15 +518,218 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
     }
 
-    // ---------- Device ID ----------
+    // ---------------- Device ID ----------------
 
     private fun getOrCreateDeviceId(ctx: Context): String {
+        cachedDeviceId?.let { return it }
         val prefs = ctx.getSharedPreferences("pulselink_prefs", Context.MODE_PRIVATE)
         val existing = prefs.getString("device_id", null)
-        if (existing != null) return existing
-
+        if (existing != null) {
+            cachedDeviceId = existing
+            return existing
+        }
         val newId = UUID.randomUUID().toString()
         prefs.edit().putString("device_id", newId).apply()
+        cachedDeviceId = newId
         return newId
+    }
+
+    // ============================================================
+    // =================== NETWORKING (NSD + TCP) =================
+    // ============================================================
+
+    private val SERVICE_TYPE = "_pulselink._tcp."
+
+    private fun startNetworking() {
+        // start TCP server (if not already)
+        if (!isServerRunning) startTcpServer()
+
+        // NSD advertise + discover
+        registerService()
+        discoverServices()
+    }
+
+    private fun stopNetworking() {
+        try { stopDiscovery() } catch (_: Exception) {}
+        try { unregisterService() } catch (_: Exception) {}
+        try { stopTcpServer() } catch (_: Exception) {}
+        peers.clear()
+        pushPeersUpdate()
+    }
+
+    private fun startTcpServer() {
+        isServerRunning = true
+        thread(name = "pulselink-server") {
+            try {
+                val ss = ServerSocket(0) // auto port
+                serverSocket = ss
+                serverPort = ss.localPort
+
+                while (isServerRunning) {
+                    val client = ss.accept()
+                    thread(name = "pulselink-client") { handleClient(client) }
+                }
+            } catch (_: Exception) {
+            } finally {
+                isServerRunning = false
+            }
+        }
+    }
+
+    private fun stopTcpServer() {
+        isServerRunning = false
+        try { serverSocket?.close() } catch (_: Exception) {}
+        serverSocket = null
+        serverPort = null
+    }
+
+    private fun handleClient(socket: Socket) {
+        try {
+            socket.soTimeout = 5000
+            val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+            val sb = StringBuilder()
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                sb.append(line)
+            }
+            val payload = sb.toString().trim()
+            if (payload.isNotEmpty()) {
+                // push to Flutter
+                runOnUiThread {
+                    receivedSink?.success(payload)
+                }
+            }
+        } catch (_: Exception) {
+        } finally {
+            try { socket.close() } catch (_: Exception) {}
+        }
+    }
+
+    private fun registerService() {
+        val port = serverPort ?: return
+        val ctx = applicationContext
+        val id = getOrCreateDeviceId(ctx)
+
+        val serviceName = "PulseLink-$id"
+
+        val serviceInfo = NsdServiceInfo().apply {
+            this.serviceName = serviceName
+            this.serviceType = SERVICE_TYPE
+            this.port = port
+        }
+
+        registrationListener = object : NsdManager.RegistrationListener {
+            override fun onRegistrationFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {}
+            override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {}
+            override fun onServiceRegistered(serviceInfo: NsdServiceInfo?) {}
+            override fun onServiceUnregistered(serviceInfo: NsdServiceInfo?) {}
+        }
+
+        try {
+            nsdManager?.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, registrationListener)
+        } catch (_: Exception) {}
+    }
+
+    private fun unregisterService() {
+        try {
+            registrationListener?.let { nsdManager?.unregisterService(it) }
+        } catch (_: Exception) {}
+        registrationListener = null
+    }
+
+    private fun discoverServices() {
+        if (discoveryListener != null) return
+
+        discoveryListener = object : NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(regType: String) {}
+            override fun onDiscoveryStopped(serviceType: String) {}
+
+            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
+                stopDiscovery()
+            }
+
+            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
+                stopDiscovery()
+            }
+
+            override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+                // Ignore non-matching service types
+                if (serviceInfo.serviceType != SERVICE_TYPE) return
+
+                // Ignore our own service by name prefix match with our device id
+                val myName = "PulseLink-${getOrCreateDeviceId(applicationContext)}"
+                if (serviceInfo.serviceName == myName) return
+
+                resolveService(serviceInfo)
+            }
+
+            override fun onServiceLost(serviceInfo: NsdServiceInfo) {
+                peers.remove(serviceInfo.serviceName)
+                pushPeersUpdate()
+            }
+        }
+
+        try {
+            nsdManager?.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+        } catch (_: Exception) {}
+    }
+
+    private fun stopDiscovery() {
+        try {
+            discoveryListener?.let { nsdManager?.stopServiceDiscovery(it) }
+        } catch (_: Exception) {}
+        discoveryListener = null
+    }
+
+    private fun resolveService(serviceInfo: NsdServiceInfo) {
+        val resolveListener = object : NsdManager.ResolveListener {
+            override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {}
+            override fun onServiceResolved(resolved: NsdServiceInfo) {
+                val host: InetAddress? = resolved.host
+                val port: Int = resolved.port
+                val name: String = resolved.serviceName
+                val ip = host?.hostAddress ?: return
+
+                peers[name] = Peer(name, ip, port)
+                pushPeersUpdate()
+            }
+        }
+
+        try { nsdManager?.resolveService(serviceInfo, resolveListener) }
+        catch (_: Exception) {}
+    }
+
+    private fun pushPeersUpdate() {
+        val list = getPeersAsList()
+        runOnUiThread {
+            peersSink?.success(list)
+        }
+    }
+
+    private fun getPeersAsList(): List<Map<String, Any>> {
+        return peers.values.map {
+            mapOf(
+                "serviceName" to it.serviceName,
+                "host" to it.host,
+                "port" to it.port
+            )
+        }.sortedBy { it["serviceName"].toString() }
+    }
+
+    private fun sendToPeer(serviceName: String, payloadJson: String): Boolean {
+        val peer = peers[serviceName] ?: return false
+
+        return try {
+            val socket = Socket(peer.host, peer.port)
+            socket.getOutputStream().use { os ->
+                // Send as plain JSON and close (server reads until EOF)
+                os.write(payloadJson.toByteArray(Charsets.UTF_8))
+                os.flush()
+            }
+            socket.close()
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 }
