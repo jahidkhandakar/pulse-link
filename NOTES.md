@@ -21,3 +21,12 @@
   - Requests `ACCESS_FINE_LOCATION` (required for SSID access on Android 10+).
   - Requests `NEARBY_WIFI_DEVICES` on Android 13+.
 - If permissions are denied/unavailable, Wi-Fi fields remain `null` and UI displays `-` (no mocked data).
+
+
+## Implemented: Carrier / SIM State / Cellular Signal (dBm)
+- Added Telephony integration using `TelephonyManager` for carrier name and SIM state.
+- Implemented best-effort signal strength (dBm) listener:
+  - API 31+ uses `TelephonyCallback.SignalStrengthsListener`.
+  - Older APIs use `PhoneStateListener`.
+- Added runtime permission flow via MethodChannel for `READ_PHONE_STATE`.
+- If permissions are denied or device/OEM restricts signal APIs, `cellularDbm` remains `null` (no mocked values).

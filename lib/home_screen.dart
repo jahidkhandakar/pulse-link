@@ -55,6 +55,18 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             if (_error != null)
               Text(_error!, style: const TextStyle(color: Colors.red)),
+            _card("Device", [
+              "Name: ${s?.deviceName ?? '-'}",
+              "Model: ${s?.model ?? '-'}",
+              "Android: ${s?.androidVersion ?? '-'}",
+            ]),
+            _card("Battery", [
+              "Level: ${s?.batteryLevel ?? '-'}%",
+              "Temp: ${s?.batteryTempC.toStringAsFixed(1) ?? '-'}°C",
+              "Health: ${s?.batteryHealth ?? '-'}",
+            ]),
+            _card("Steps", ["Steps since boot: ${s?.stepsSinceBoot ?? '-'}"]),
+            //---------------Elevated Button for Wifi---------------
             ElevatedButton(
               onPressed: () async {
                 final ok = await _service.requestWifiPermissions();
@@ -73,22 +85,36 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Text("Enable Wi-Fi Data Access"),
             ),
             const SizedBox(height: 12),
-            _card("Device", [
-              "Name: ${s?.deviceName ?? '-'}",
-              "Model: ${s?.model ?? '-'}",
-              "Android: ${s?.androidVersion ?? '-'}",
-            ]),
-            _card("Battery", [
-              "Level: ${s?.batteryLevel ?? '-'}%",
-              "Temp: ${s?.batteryTempC.toStringAsFixed(1) ?? '-'}°C",
-              "Health: ${s?.batteryHealth ?? '-'}",
-            ]),
-            _card("Steps", ["Steps since boot: ${s?.stepsSinceBoot ?? '-'}"]),
             _card("Wi-Fi", [
               "SSID: ${s?.wifiSsid ?? '-'}",
               "RSSI: ${s?.wifiRssi ?? '-'} dBm",
               "Local IP: ${s?.localIp ?? '-'}",
             ]),
+            //--------------Elevated Button for Cellular---------------
+            ElevatedButton(
+              onPressed: () async {
+                final ok = await _service.requestPhonePermissions();
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      ok
+                          ? "Phone permissions granted ✅"
+                          : "Permission denied ❌",
+                    ),
+                  ),
+                );
+                await _refresh();
+              },
+              child: const Text("Enable Carrier & Signal Data"),
+            ),
+            const SizedBox(height: 24),
+            _card("Cellular", [
+              "Carrier: ${s?.carrierName ?? '-'}",
+              "SIM: ${s?.simState ?? '-'}",
+              "Signal: ${s?.cellularDbm ?? '-'} dBm",
+            ]),
+
             const SizedBox(height: 12),
             ElevatedButton(
               onPressed: () {

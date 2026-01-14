@@ -9,7 +9,8 @@ class NativeDeviceService {
   }
 
   Future<bool> requestWifiPermissions() async {
-    return (await _channel.invokeMethod<bool>('requestWifiPermissions')) ?? false;
+    return (await _channel.invokeMethod<bool>('requestWifiPermissions')) ??
+        false;
   }
 
   Future<Map<String, dynamic>> _getMap(String method) async {
@@ -20,5 +21,14 @@ class NativeDeviceService {
   Future<DeviceSnapshot> getSnapshot() async {
     final data = await _getMap('getSnapshot');
     return DeviceSnapshot.fromJson(data);
+  }
+
+  Future<bool> hasPhonePermissions() async {
+    return (await _channel.invokeMethod<bool>('hasPhonePermissions')) ?? false;
+  }
+
+  Future<bool> requestPhonePermissions() async {
+    return (await _channel.invokeMethod<bool>('requestPhonePermissions')) ??
+        false;
   }
 }
