@@ -1,15 +1,18 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-
 import '../models/device_snapshot.dart';
 import '../platform/native_device_service.dart';
 import '../platform/native_network_service.dart';
 import '../storage/received_store.dart';
-import 'received_screen.dart';
+import '../widgets/app_app_bar.dart';
+import '../widgets/status_drawer.dart';
+import '../widgets/home_tab_content.dart';
+import '../widgets/received_data_tab.dart';
 import 'share_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final int initialTabIndex;
+  const HomeScreen({super.key, this.initialTabIndex = 0});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -30,14 +33,17 @@ class _HomeScreenState extends State<HomeScreen> {
   DeviceSnapshot? _snap;
   String? _error;
 
+  late int _tabIndex;
+
   @override
   void initState() {
     super.initState();
+    _tabIndex = widget.initialTabIndex;
     _boot();
   }
 
   Future<void> _boot() async {
-    await _refresh(); // initial snapshot fast
+    await _refresh();
     _timer = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
 
     await _checkPerms();
@@ -60,18 +66,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _bootNetworkingOnce() async {
     if (_networkBooted) return;
-    _networkBooted = true;
 
     try {
       await _net.startNetworking();
-
       _rxSub = _net.receivedJsonStream.listen((jsonStr) async {
         try {
           await _store.addRaw(jsonStr);
-        } catch (_) {
-          // ignore
-        }
+        } catch (_) {}
       });
+
+      if (!mounted) return;
+      setState(() => _networkBooted = true);
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = "Networking error: $e");
@@ -98,11 +103,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() => _wifiPermOk = ok);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          ok ? "Wi-Fi permissions granted ✅" : "Wi-Fi permission denied ❌",
-        ),
-      ),
+      SnackBar(content: Text(ok ? "Wi-Fi permissions granted ✅" : "Wi-Fi permission denied ❌")),
     );
     await _refresh();
   }
@@ -113,11 +114,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() => _phonePermOk = ok);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          ok ? "Phone permission granted ✅" : "Phone permission denied ❌",
-        ),
-      ),
+      SnackBar(content: Text(ok ? "Phone permission granted ✅" : "Phone permission denied ❌")),
     );
     await _refresh();
   }
@@ -131,181 +128,56 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final s = _snap;
-
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('PulseLink'),
-        actions: [
-          IconButton(
-            tooltip: "Received Data",
-            icon: const Icon(Icons.inbox_outlined),
-            onPressed: () {
-              Navigator.of(
-                context,
-              ).push(MaterialPageRoute(builder: (_) => const ReceivedScreen()));
-            },
-          ),
-        ],
-      ),
-      body: RefreshIndicator(
+      appBar: AppAppBar(
+        title: 'PulseLink',
         onRefresh: () async {
           await _checkPerms();
           await _refresh();
         },
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            if (_error != null) _errorBanner(_error!),
-
-            _permChips(),
-
-            _card("Device", [
-              "Name: ${s?.deviceName ?? '-'}",
-              "Model: ${s?.model ?? '-'}",
-              "Android: ${s?.androidVersion ?? '-'}",
-              "Local IP: ${s?.localIp ?? '-'}",
-            ]),
-
-            _card("Battery", [
-              "Level: ${s?.batteryLevel ?? '-'}%",
-              "Temp: ${s?.batteryTempC.toStringAsFixed(1) ?? '-'}°C",
-              "Health: ${s?.batteryHealth ?? '-'}",
-            ]),
-
-            _card("Steps", ["Steps since boot: ${s?.stepsSinceBoot ?? '-'}"]),
-
-            _card("Activity", ["Detected: ${s?.activity ?? '-'}"]),
-
-            _card("Wi-Fi", [
-              "SSID: ${s?.wifiSsid ?? '-'}",
-              "RSSI: ${s?.wifiRssi ?? '-'} dBm",
-            ]),
-            const SizedBox(height: 8),
-            ElevatedButton.icon(
-              onPressed: _requestWifiPerm,
-              icon: const Icon(Icons.wifi),
-              label: const Text("Enable Wi-Fi Data Access"),
-            ),
-
-            const SizedBox(height: 12),
-
-            _card("Cellular", [
-              "Carrier: ${s?.carrierName ?? '-'}",
-              "SIM: ${s?.simState ?? '-'}",
-              "Signal: ${s?.cellularDbm ?? '-'} dBm",
-            ]),
-            const SizedBox(height: 8),
-            ElevatedButton.icon(
-              onPressed: _requestPhonePerm,
-              icon: const Icon(Icons.cell_tower),
-              label: const Text("Enable Carrier & Signal Data"),
-            ),
-
-            const SizedBox(height: 20),
-
-            //Buttons
-            Row(
-              children: [
-                ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const ShareScreen()),
-                    );
-                  },
-                  icon: const Icon(Icons.share),
-                  label: const Text("Share My Pulse"),
-                ),
-
-                const SizedBox(width: 12),
-
-                ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const ReceivedScreen()),
-                    );
-                  },
-                  icon: const Icon(Icons.history),
-                  label: const Text("Received Data"),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              child: const Text(
-                "NB: If some fields show '-', it usually means permissions are missing or the device/OEM restricts access.",
-                style: TextStyle(color: Colors.grey),
-              ),
-            ),
-          ],
-        ),
+        onShare: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ShareScreen()),
+          );
+        },
       ),
-    );
-  }
-
-  //*_________________Widgets_________________*//
-  Widget _permChips() {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        Chip(
-          avatar: Icon(_wifiPermOk ? Icons.check_circle : Icons.error_outline),
-          label: Text("Wi-Fi: ${_wifiPermOk ? "OK" : "NO"}"),
-        ),
-        Chip(
-          avatar: Icon(_phonePermOk ? Icons.check_circle : Icons.error_outline),
-          label: Text("Phone: ${_phonePermOk ? "OK" : "NO"}"),
-        ),
-        Chip(
-          avatar: Icon(
-            _networkBooted ? Icons.check_circle : Icons.hourglass_empty,
-          ),
-          label: Text("Networking: ${_networkBooted ? "ON" : "OFF"}"),
-        ),
-      ],
-    );
-  }
-
-  Widget _errorBanner(String text) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.red.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(12),
+      drawer: StatusDrawer(
+        wifiOk: _wifiPermOk,
+        phoneOk: _phonePermOk,
+        networkingOn: _networkBooted,
       ),
-      child: Row(
+      body: IndexedStack(
+        index: _tabIndex,
         children: [
-          const Icon(Icons.error_outline, color: Colors.red),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(text, style: const TextStyle(color: Colors.red)),
+          HomeTabContent(
+            snap: _snap,
+            error: _error,
+            onRefresh: () async {
+              await _checkPerms();
+              await _refresh();
+            },
+            onRequestWifi: _requestWifiPerm,
+            onRequestPhone: _requestPhonePerm,
           ),
+          const ReceivedDataTab(),
         ],
       ),
-    );
-  }
-
-  Widget _card(String title, List<String> lines) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            ...lines.map(
-              (t) => Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text(t),
-              ),
-            ),
-          ],
-        ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _tabIndex,
+        onTap: (i) => setState(() => _tabIndex = i),
+        type: BottomNavigationBarType.fixed,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.dashboard_outlined),
+            activeIcon: Icon(Icons.dashboard),
+            label: 'Home',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.inbox_outlined),
+            activeIcon: Icon(Icons.inbox),
+            label: 'Data',
+          ),
+        ],
       ),
     );
   }
