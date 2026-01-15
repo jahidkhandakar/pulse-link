@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:pulse_link/widgets/notice_board.dart';
 
 class StatusDrawer extends StatelessWidget {
   final bool wifiOk;
@@ -23,9 +24,10 @@ class StatusDrawer extends StatelessWidget {
           children: [
             Text(
               "Status",
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+              textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
 
@@ -53,22 +55,20 @@ class StatusDrawer extends StatelessWidget {
               badText: "OFF",
             ),
 
-            const SizedBox(height: 18),
+            const SizedBox(height: 350),
             Divider(color: cs.outlineVariant),
             const SizedBox(height: 12),
 
             Text(
               "Tip",
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
-            Text(
-              "If some fields show '-', it usually means permissions are missing or the device/OEM restricts access.",
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: cs.onSurfaceVariant,
-                  ),
+            NoticeBoard(
+              text:
+                  "If some fields show '-', it usually means permissions are missing or the Device/OEM restricts access.",
             ),
           ],
         ),

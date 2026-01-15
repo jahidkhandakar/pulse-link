@@ -8,6 +8,8 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
@@ -22,11 +24,8 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.net.Inet4Address
+import java.io.ByteArrayOutputStream
 import java.net.InetAddress
-import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.UUID
@@ -34,8 +33,6 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
 import kotlin.math.abs
 import kotlin.math.sqrt
-import android.net.nsd.NsdManager
-import android.net.nsd.NsdServiceInfo
 
 class MainActivity : FlutterActivity(), SensorEventListener {
 
@@ -79,11 +76,13 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private var serverSocket: ServerSocket? = null
     @Volatile private var serverPort: Int? = null
     @Volatile private var isServerRunning: Boolean = false
+    @Volatile private var isNetworkingStarted: Boolean = false
 
     private var registrationListener: NsdManager.RegistrationListener? = null
     private var discoveryListener: NsdManager.DiscoveryListener? = null
+    private var registeredServiceName: String? = null
 
-    // peers: key = serviceName, value = Peer(serviceName, host, port)
+    // peers: key = serviceName
     private val peers = ConcurrentHashMap<String, Peer>()
 
     data class Peer(
@@ -95,6 +94,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     // -------- Event sinks --------
     private var receivedSink: EventChannel.EventSink? = null
     private var peersSink: EventChannel.EventSink? = null
+
+    private val SERVICE_TYPE = "_pulselink._tcp."
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -316,7 +317,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     }
 
     private fun getBatteryFromIntent(ctx: Context, levelFallback: Int): BatteryInfo {
-        val intent = ctx.registerReceiver(null,
+        val intent = ctx.registerReceiver(
+            null,
             android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)
         )
         val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, levelFallback) ?: levelFallback
@@ -355,24 +357,30 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             ?.removePrefix("\"")?.removeSuffix("\"")
 
         val rssi = info?.rssi
-        val ip = getLocalIpv4Address()
+
+        // ✅ FIX: Use DHCP ipAddress (correct device LAN IP on Wi-Fi)
+        val ip = getLocalWifiIp(ctx)
+
         return WifiInfo(ssid, rssi, ip)
     }
 
-    private fun getLocalIpv4Address(): String? {
+    private fun getLocalWifiIp(ctx: Context): String? {
         return try {
-            val interfaces = NetworkInterface.getNetworkInterfaces()
-            for (intf in interfaces) {
-                val addrs = intf.inetAddresses
-                for (addr in addrs) {
-                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
-                        val ip = addr.hostAddress
-                        if (!ip.isNullOrBlank()) return ip
-                    }
-                }
-            }
+            val wifiManager = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val dhcp = wifiManager.dhcpInfo ?: return null
+            val ipInt = dhcp.ipAddress
+            if (ipInt == 0) return null
+
+            String.format(
+                "%d.%d.%d.%d",
+                ipInt and 0xff,
+                ipInt shr 8 and 0xff,
+                ipInt shr 16 and 0xff,
+                ipInt shr 24 and 0xff
+            )
+        } catch (_: Exception) {
             null
-        } catch (_: Exception) { null }
+        }
     }
 
     // ---------------- Telephony ----------------
@@ -381,7 +389,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     private fun readTelephonyInfoOrNull(): TelephonyInfo? {
         val tm = telephonyManager ?: return null
-
         val carrier = try { tm.networkOperatorName } catch (_: Exception) { null }
 
         val simState = try {
@@ -538,18 +545,32 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     // =================== NETWORKING (NSD + TCP) =================
     // ============================================================
 
-    private val SERVICE_TYPE = "_pulselink._tcp."
-
     private fun startNetworking() {
-        // start TCP server (if not already)
-        if (!isServerRunning) startTcpServer()
+        if (isNetworkingStarted) return
+        isNetworkingStarted = true
 
-        // NSD advertise + discover
-        registerService()
-        discoverServices()
+        // Start server first (synchronously set port), then advertise.
+        startTcpServer()
+
+        // Wait briefly until serverPort is available (avoid race)
+        thread(name = "pulselink-net-boot") {
+            var tries = 0
+            while (serverPort == null && tries < 50) { // ~1s max
+                Thread.sleep(20)
+                tries++
+            }
+
+            runOnUiThread {
+                // Always re-register to ensure correct port is advertised
+                try { unregisterService() } catch (_: Exception) {}
+                registerService()
+                discoverServices()
+            }
+        }
     }
 
     private fun stopNetworking() {
+        isNetworkingStarted = false
         try { stopDiscovery() } catch (_: Exception) {}
         try { unregisterService() } catch (_: Exception) {}
         try { stopTcpServer() } catch (_: Exception) {}
@@ -558,6 +579,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     }
 
     private fun startTcpServer() {
+        if (isServerRunning) return
+
         isServerRunning = true
         thread(name = "pulselink-server") {
             try {
@@ -583,21 +606,23 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         serverPort = null
     }
 
+    // ✅ FIX: Read raw bytes (not readLine), since payload has no newline
     private fun handleClient(socket: Socket) {
         try {
             socket.soTimeout = 5000
-            val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
-            val sb = StringBuilder()
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                sb.append(line)
+            val input = socket.getInputStream()
+            val buffer = ByteArray(4096)
+            val baos = ByteArrayOutputStream()
+
+            while (true) {
+                val read = input.read(buffer)
+                if (read == -1) break
+                baos.write(buffer, 0, read)
             }
-            val payload = sb.toString().trim()
+
+            val payload = baos.toString(Charsets.UTF_8.name()).trim()
             if (payload.isNotEmpty()) {
-                // push to Flutter
-                runOnUiThread {
-                    receivedSink?.success(payload)
-                }
+                runOnUiThread { receivedSink?.success(payload) }
             }
         } catch (_: Exception) {
         } finally {
@@ -607,10 +632,9 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     private fun registerService() {
         val port = serverPort ?: return
-        val ctx = applicationContext
-        val id = getOrCreateDeviceId(ctx)
-
+        val id = getOrCreateDeviceId(applicationContext)
         val serviceName = "PulseLink-$id"
+        registeredServiceName = serviceName
 
         val serviceInfo = NsdServiceInfo().apply {
             this.serviceName = serviceName
@@ -621,7 +645,10 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         registrationListener = object : NsdManager.RegistrationListener {
             override fun onRegistrationFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {}
             override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {}
-            override fun onServiceRegistered(serviceInfo: NsdServiceInfo?) {}
+            override fun onServiceRegistered(serviceInfo: NsdServiceInfo?) {
+                // Android may rename serviceName to resolve conflicts; store it if provided
+                serviceInfo?.serviceName?.let { registeredServiceName = it }
+            }
             override fun onServiceUnregistered(serviceInfo: NsdServiceInfo?) {}
         }
 
@@ -653,11 +680,10 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             }
 
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                // Ignore non-matching service types
                 if (serviceInfo.serviceType != SERVICE_TYPE) return
 
-                // Ignore our own service by name prefix match with our device id
-                val myName = "PulseLink-${getOrCreateDeviceId(applicationContext)}"
+                // Ignore our own service by name (use registered name if Android renamed it)
+                val myName = registeredServiceName ?: "PulseLink-${getOrCreateDeviceId(applicationContext)}"
                 if (serviceInfo.serviceName == myName) return
 
                 resolveService(serviceInfo)
@@ -684,11 +710,17 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private fun resolveService(serviceInfo: NsdServiceInfo) {
         val resolveListener = object : NsdManager.ResolveListener {
             override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {}
+
             override fun onServiceResolved(resolved: NsdServiceInfo) {
                 val host: InetAddress? = resolved.host
                 val port: Int = resolved.port
                 val name: String = resolved.serviceName
                 val ip = host?.hostAddress ?: return
+
+                // Extra safety: don't add peers that resolve to our own IP + port
+                val myIp = getLocalWifiIp(applicationContext)
+                val myPort = serverPort
+                if (myIp != null && myPort != null && ip == myIp && port == myPort) return
 
                 peers[name] = Peer(name, ip, port)
                 pushPeersUpdate()
@@ -701,9 +733,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     private fun pushPeersUpdate() {
         val list = getPeersAsList()
-        runOnUiThread {
-            peersSink?.success(list)
-        }
+        runOnUiThread { peersSink?.success(list) }
     }
 
     private fun getPeersAsList(): List<Map<String, Any>> {
@@ -720,13 +750,13 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         val peer = peers[serviceName] ?: return false
 
         return try {
-            val socket = Socket(peer.host, peer.port)
-            socket.getOutputStream().use { os ->
-                // Send as plain JSON and close (server reads until EOF)
-                os.write(payloadJson.toByteArray(Charsets.UTF_8))
-                os.flush()
+            Socket(peer.host, peer.port).use { socket ->
+                socket.soTimeout = 5000
+                socket.getOutputStream().use { os ->
+                    os.write(payloadJson.toByteArray(Charsets.UTF_8))
+                    os.flush()
+                }
             }
-            socket.close()
             true
         } catch (_: Exception) {
             false

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:pulse_link/theme/app_theme_mode.dart';
 
 class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
@@ -19,10 +20,7 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
     return AppBar(
       title: Text(
         title,
-        style: const TextStyle(
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.2,
-        ),
+        style: const TextStyle(fontWeight: FontWeight.w600, letterSpacing: 0.2),
       ),
       centerTitle: false,
       elevation: 0,
@@ -30,6 +28,11 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
       backgroundColor: cs.surface,
       surfaceTintColor: Colors.transparent,
       actions: [
+        IconButton(
+          tooltip: "Toggle theme",
+          icon: const Icon(Icons.brightness_6_outlined),
+          onPressed: () => AppThemeMode.toggle(),
+        ),
         if (onShare != null)
           IconButton(
             tooltip: "Share My Pulse",

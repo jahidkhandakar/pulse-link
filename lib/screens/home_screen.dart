@@ -103,7 +103,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() => _wifiPermOk = ok);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(ok ? "Wi-Fi permissions granted ✅" : "Wi-Fi permission denied ❌")),
+      SnackBar(
+        content: Text(
+          ok ? "Wi-Fi permissions granted ✅" : "Wi-Fi permission denied ❌",
+        ),
+      ),
     );
     await _refresh();
   }
@@ -114,7 +118,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() => _phonePermOk = ok);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(ok ? "Phone permission granted ✅" : "Phone permission denied ❌")),
+      SnackBar(
+        content: Text(
+          ok ? "Phone permission granted ✅" : "Phone permission denied ❌",
+        ),
+      ),
     );
     await _refresh();
   }
@@ -136,9 +144,9 @@ class _HomeScreenState extends State<HomeScreen> {
           await _refresh();
         },
         onShare: () {
-          Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const ShareScreen()),
-          );
+          Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => const ShareScreen()));
         },
       ),
       drawer: StatusDrawer(
@@ -179,6 +187,20 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
+      floatingActionButton: _tabIndex == 0
+          ? FloatingActionButton.extended(
+              onPressed: () {
+                Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const ShareScreen()));
+              },
+              icon: const Icon(Icons.share),
+              label: const Text("Share"),
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+            )
+          : null,
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
 }

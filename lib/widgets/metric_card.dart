@@ -22,12 +22,15 @@ class MetricCard extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min, // ✅ important
         children: [
-          Text(
-            title,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+          Center(
+            child: Text(
+              title,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
           ),
           const SizedBox(height: 8),
           ...lines.map(
@@ -39,7 +42,6 @@ class MetricCard extends StatelessWidget {
               ),
             ),
           ),
-          const Spacer(),
         ],
       ),
     );

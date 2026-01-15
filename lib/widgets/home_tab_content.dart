@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
-
 import '../models/device_snapshot.dart';
 import 'metric_card.dart';
-import 'notice_board.dart';
 import 'section_container.dart';
 
 class HomeTabContent extends StatelessWidget {
@@ -132,14 +130,7 @@ class HomeTabContent extends StatelessWidget {
               ],
             ),
           ),
-
-          // Notice board
-          NoticeBoard(
-            text:
-                "NB: If some fields show '-', it usually means permissions are missing or the device/OEM restricts access.",
-          ),
-
-          const SizedBox(height: 90), // breathing room above bottom nav
+          const SizedBox(height: 55), // breathing room above bottom nav
         ],
       ),
     );
