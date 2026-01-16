@@ -9,6 +9,8 @@ class DeviceSnapshot {
   final String batteryHealth; // Good / Overheat / Unknown
 
   final int? stepsSinceBoot;
+  final bool? stepSensorAvailable; // ✅ NEW: true/false/null
+
   final String? activity; // Walking / Still / null
 
   final String? wifiSsid;
@@ -31,6 +33,7 @@ class DeviceSnapshot {
     required this.batteryHealth,
     required this.timestamp,
     this.stepsSinceBoot,
+    this.stepSensorAvailable,
     this.activity,
     this.wifiSsid,
     this.wifiRssi,
@@ -49,6 +52,7 @@ class DeviceSnapshot {
         "batteryTempC": batteryTempC,
         "batteryHealth": batteryHealth,
         "stepsSinceBoot": stepsSinceBoot,
+        "stepSensorAvailable": stepSensorAvailable, // ✅ NEW
         "activity": activity,
         "wifiSsid": wifiSsid,
         "wifiRssi": wifiRssi,
@@ -71,6 +75,8 @@ class DeviceSnapshot {
       batteryHealth: _asString(json["batteryHealth"], fallback: "Unknown"),
 
       stepsSinceBoot: _asNullableInt(json["stepsSinceBoot"]),
+      stepSensorAvailable: _asNullableBool(json["stepSensorAvailable"]), // ✅ NEW
+
       activity: _asNullableString(json["activity"]),
 
       wifiSsid: _asNullableString(json["wifiSsid"]),
@@ -110,22 +116,32 @@ String? _asNullableString(dynamic v) {
 int _asInt(dynamic v, {required int fallback}) {
   if (v == null) return fallback;
   if (v is int) return v;
-  if (v is double) return v.toInt();
+  if (v is num) return v.toInt();
   return int.tryParse(v.toString()) ?? fallback;
 }
 
 int? _asNullableInt(dynamic v) {
   if (v == null) return null;
   if (v is int) return v;
-  if (v is double) return v.toInt();
+  if (v is num) return v.toInt();
   return int.tryParse(v.toString());
 }
 
 double _asDouble(dynamic v, {required double fallback}) {
   if (v == null) return fallback;
   if (v is double) return v;
-  if (v is int) return v.toDouble();
+  if (v is num) return v.toDouble();
   return double.tryParse(v.toString()) ?? fallback;
+}
+
+bool? _asNullableBool(dynamic v) {
+  if (v == null) return null;
+  if (v is bool) return v;
+  if (v is num) return v != 0;
+  final s = v.toString().trim().toLowerCase();
+  if (s == "true") return true;
+  if (s == "false") return false;
+  return null;
 }
 
 DateTime? _asDateTime(dynamic v) {

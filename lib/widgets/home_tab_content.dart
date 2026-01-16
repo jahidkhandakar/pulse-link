@@ -10,6 +10,9 @@ class HomeTabContent extends StatelessWidget {
   final Future<void> Function() onRefresh;
   final Future<void> Function() onRequestWifi;
   final Future<void> Function() onRequestPhone;
+  final Future<void> Function() onRequestActivity;
+
+  final bool activityPermOk;
 
   const HomeTabContent({
     super.key,
@@ -18,6 +21,8 @@ class HomeTabContent extends StatelessWidget {
     required this.onRefresh,
     required this.onRequestWifi,
     required this.onRequestPhone,
+    required this.onRequestActivity,
+    required this.activityPermOk,
   });
 
   @override
@@ -66,20 +71,36 @@ class HomeTabContent extends StatelessWidget {
           // Section: Steps + Activity (row)
           SectionContainer(
             child: IntrinsicHeight(
-              child: Row(
+              child: Column(
                 children: [
-                  Expanded(
-                    child: MetricCard(
-                      title: "Steps",
-                      lines: ["Since boot: ${s?.stepsSinceBoot ?? '-'}"],
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: MetricCard(
+                          title: "Steps",
+                          lines: [
+                            "Since boot: ${s?.stepsSinceBoot ?? '-'}",
+                            if (s != null && (s.stepSensorAvailable == false))
+                              "Sensor: Not supported",
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: MetricCard(
+                          title: "Activity",
+                          lines: ["Detected: ${s?.activity ?? '-'}"],
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: MetricCard(
-                      title: "Activity",
-                      lines: ["Detected: ${s?.activity ?? '-'}"],
-                    ),
+                  const SizedBox(height: 10),
+                  FilledButton.icon(
+                    onPressed: activityPermOk ? null : onRequestActivity,
+                    icon: const Icon(Icons.directions_run),
+                    label: Text(activityPermOk
+                        ? "Activity Recognition: Enabled"
+                        : "Enable Activity Recognition"),
                   ),
                 ],
               ),
@@ -130,7 +151,8 @@ class HomeTabContent extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 55), // breathing room above bottom nav
+
+          const SizedBox(height: 55),
         ],
       ),
     );
@@ -152,10 +174,7 @@ class HomeTabContent extends StatelessWidget {
           Icon(Icons.error_outline, color: cs.onErrorContainer),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              text,
-              style: TextStyle(color: cs.onErrorContainer),
-            ),
+            child: Text(text, style: TextStyle(color: cs.onErrorContainer)),
           ),
         ],
       ),

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import '../models/device_snapshot.dart';
 import '../storage/received_store.dart';
+import '../widgets/time_converter.dart';
+import '../widgets/snap_details_converter.dart';
 
 class ReceivedScreen extends StatelessWidget {
   const ReceivedScreen({super.key});
@@ -10,6 +12,7 @@ class ReceivedScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = ReceivedStore();
+    final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -32,7 +35,7 @@ class ReceivedScreen extends StatelessWidget {
       body: ValueListenableBuilder<Box<String>>(
         valueListenable: store.listenable(),
         builder: (context, box, _) {
-          final items = box.values.toList().reversed.toList(); // newest first
+          final items = box.values.toList().reversed.toList();
 
           if (items.isEmpty) {
             return const Center(
@@ -43,9 +46,10 @@ class ReceivedScreen extends StatelessWidget {
             );
           }
 
-          return ListView.builder(
+          return ListView.separated(
             padding: const EdgeInsets.all(12),
             itemCount: items.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
             itemBuilder: (context, i) {
               final raw = items[i];
 
@@ -56,21 +60,19 @@ class ReceivedScreen extends StatelessWidget {
               } catch (_) {}
 
               final title = snap?.deviceName ?? "Unknown Device";
-              final time = snap?.timestamp.toLocal().toString().split('.').first ?? "-";
 
               final summary = [
-                if (snap?.batteryLevel != null) "🔋 ${snap!.batteryLevel}%",
+                if (snap?.model != null) "📱 ${snap!.model}",
+                if (snap != null) "🔋 ${snap.batteryLevel}%",
+                if (snap?.stepsSinceBoot != null) "👣 ${snap!.stepsSinceBoot}",
                 if (snap?.activity != null) "🏃 ${snap!.activity}",
                 if (snap?.wifiSsid != null) "📶 ${snap!.wifiSsid}",
                 if (snap?.carrierName != null) "📡 ${snap!.carrierName}",
               ].join("  ");
 
               return Card(
-                child: ListTile(
-                  title: Text(title),
-                  subtitle: Text(summary.isEmpty ? "Tap to view JSON" : summary,
-                      maxLines: 2, overflow: TextOverflow.ellipsis),
-                  trailing: Text(time, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
                   onTap: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
@@ -78,6 +80,58 @@ class ReceivedScreen extends StatelessWidget {
                       ),
                     );
                   },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.only(top: 2),
+                          child: Icon(Icons.inbox_outlined),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleSmall
+                                    ?.copyWith(fontWeight: FontWeight.w700),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                summary.isEmpty
+                                    ? "Tap to view details"
+                                    : summary,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(
+                                      color:
+                                          cs.onSurface,
+                                      height: 1.2,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                              ),
+                              const SizedBox(height: 6),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TimeConverter(dateTime: snap?.timestamp),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const Icon(Icons.chevron_right),
+                      ],
+                    ),
+                  ),
                 ),
               );
             },
@@ -95,25 +149,55 @@ class _ReceivedDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Map<String, dynamic>? map;
+    DeviceSnapshot? snap;
+
     try {
       map = jsonDecode(rawJson) as Map<String, dynamic>;
+      snap = DeviceSnapshot.fromJson(map);
     } catch (_) {}
 
-    final pretty = map != null
-        ? const JsonEncoder.withIndent("  ").convert(map)
-        : rawJson;
-
     return Scaffold(
-      appBar: AppBar(title: const Text("Snapshot Details")),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: SingleChildScrollView(
-          child: SelectableText(
-            pretty,
-            style: const TextStyle(fontFamily: "monospace"),
+      appBar: AppBar(
+        title: const Text("Snapshot Details"),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            tooltip: "View raw JSON",
+            icon: const Icon(Icons.code),
+            onPressed: () {
+              final pretty = map != null
+                  ? const JsonEncoder.withIndent("  ").convert(map)
+                  : rawJson;
+
+              showModalBottomSheet(
+                context: context,
+                showDragHandle: true,
+                builder: (_) => Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      pretty,
+                      style: const TextStyle(fontFamily: "monospace"),
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
-        ),
+        ],
       ),
+      body: snap == null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  "Couldn’t parse this snapshot 😵‍💫\nTry sending again.",
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
+            )
+          : SnapDetailsConverter(snap: snap),
     );
   }
 }

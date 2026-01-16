@@ -29,6 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _networkBooted = false;
   bool _wifiPermOk = false;
   bool _phonePermOk = false;
+  bool _activityPermOk = false;
 
   DeviceSnapshot? _snap;
   String? _error;
@@ -54,10 +55,13 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final wifi = await _device.hasWifiPermissions();
       final phone = await _device.hasPhonePermissions();
+      final activity = await _device.hasActivityPermissions();
+
       if (!mounted) return;
       setState(() {
         _wifiPermOk = wifi;
         _phonePermOk = phone;
+        _activityPermOk = activity;
       });
     } catch (_) {
       // ignore
@@ -103,11 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() => _wifiPermOk = ok);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          ok ? "Wi-Fi permissions granted ✅" : "Wi-Fi permission denied ❌",
-        ),
-      ),
+      SnackBar(content: Text(ok ? "Wi-Fi permissions granted ✅" : "Wi-Fi permission denied ❌")),
     );
     await _refresh();
   }
@@ -118,11 +118,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() => _phonePermOk = ok);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          ok ? "Phone permission granted ✅" : "Phone permission denied ❌",
-        ),
-      ),
+      SnackBar(content: Text(ok ? "Phone permission granted ✅" : "Phone permission denied ❌")),
+    );
+    await _refresh();
+  }
+
+  Future<void> _requestActivityPerm() async {
+    final ok = await _device.requestActivityPermissions();
+    if (!mounted) return;
+
+    setState(() => _activityPermOk = ok);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(ok ? "Activity Recognition enabled ✅" : "Activity Recognition denied ❌")),
     );
     await _refresh();
   }
@@ -144,15 +151,16 @@ class _HomeScreenState extends State<HomeScreen> {
           await _refresh();
         },
         onShare: () {
-          Navigator.of(
-            context,
-          ).push(MaterialPageRoute(builder: (_) => const ShareScreen()));
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ShareScreen()),
+          );
         },
       ),
       drawer: StatusDrawer(
         wifiOk: _wifiPermOk,
         phoneOk: _phonePermOk,
         networkingOn: _networkBooted,
+        // if your drawer supports it, you can add activity too later
       ),
       body: IndexedStack(
         index: _tabIndex,
@@ -166,6 +174,8 @@ class _HomeScreenState extends State<HomeScreen> {
             },
             onRequestWifi: _requestWifiPerm,
             onRequestPhone: _requestPhonePerm,
+            onRequestActivity: _requestActivityPerm,
+            activityPermOk: _activityPermOk,
           ),
           const ReceivedDataTab(),
         ],
@@ -190,12 +200,12 @@ class _HomeScreenState extends State<HomeScreen> {
       floatingActionButton: _tabIndex == 0
           ? FloatingActionButton.extended(
               onPressed: () {
-                Navigator.of(
-                  context,
-                ).push(MaterialPageRoute(builder: (_) => const ShareScreen()));
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ShareScreen()),
+                );
               },
               icon: const Icon(Icons.share),
-              label: const Text("Share"),
+              label: const Text("Share My Pulse"),
               backgroundColor: Theme.of(context).colorScheme.primary,
               foregroundColor: Theme.of(context).colorScheme.onPrimary,
             )

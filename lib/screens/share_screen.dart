@@ -4,6 +4,7 @@ import '../models/device_snapshot.dart';
 import '../models/peer.dart';
 import '../platform/native_device_service.dart';
 import '../platform/native_network_service.dart';
+import '../widgets/peer_details_converter.dart';
 
 class ShareScreen extends StatefulWidget {
   const ShareScreen({super.key});
@@ -29,7 +30,6 @@ class _ShareScreenState extends State<ShareScreen> {
   }
 
   Future<void> _boot() async {
-    // Safe to call even if already started on Home
     await _net.startNetworking();
 
     _peerSub = _net.peersStream.listen((list) {
@@ -67,7 +67,13 @@ class _ShareScreenState extends State<ShareScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(ok ? "Sent to ${peer.serviceName} ✅" : "Send failed ❌")),
+        SnackBar(
+          content: Text(
+            ok
+                ? "Sent ✅"
+                : "Send failed ❌",
+          ),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -86,7 +92,7 @@ class _ShareScreenState extends State<ShareScreen> {
         : "Found ${_peers.length} peer(s). Tap one to send your snapshot.";
 
     return Scaffold(
-      appBar: AppBar(title: const Text("Nearby Peers")),
+      appBar: AppBar(title: const Text("Nearby Peers"), centerTitle: true,),
       body: _starting && _peers.isEmpty
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -106,19 +112,25 @@ class _ShareScreenState extends State<ShareScreen> {
                       ),
                     );
                   }
+
                   final peer = _peers[i - 1];
+
                   return Card(
-                    child: ListTile(
-                      title: Text(peer.serviceName),
-                      subtitle: Text(peer.endpoint),
-                      trailing: _sending
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.send),
+                    child: InkWell(
                       onTap: _sending ? null : () => _send(peer),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: PeerDetailsConverter(
+                          peer: peer,
+                          trailing: _sending
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.send),
+                        ),
+                      ),
                     ),
                   );
                 },
