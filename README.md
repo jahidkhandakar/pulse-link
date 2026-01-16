@@ -33,7 +33,7 @@ This project was built as a technical assessment to demonstrate native Android i
 - Incoming snapshots are persisted locally using **Hive**
 - Data survives app restarts
 - View recent snapshots (newest first)
-- Tap any item to inspect the full JSON payload
+- Tap to view details; raw payload available via button
 - Optional history cap to avoid unbounded storage growth
 
 ---
