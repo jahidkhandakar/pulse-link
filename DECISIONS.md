@@ -19,7 +19,7 @@ The task requires direct access to Android-specific sensors, telephony APIs, and
 
 **Rationale:**  
 minSdk 21 ensures compatibility with required sensors and networking APIs.  
-targetSdk and compileSdk 35 align with modern Android security and Play Store requirements.
+targetSdk and compileSdk 36 align with modern Android security and Play Store requirements.
 
 ---
 

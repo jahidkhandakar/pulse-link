@@ -44,3 +44,14 @@ This project was built as a technical assessment to demonstrate native Android i
 2. Run:
    ```bash
    flutter pub get
+
+## Tech Stack
+- Flutter (UI + state)
+- Kotlin (native Android integration)
+- Android Sensors API
+- Android NSD (mDNS/DNS-SD)
+- TCP sockets
+- Hive (local persistence)
+
+
+> Devices must be connected to the same Wi-Fi network for peer discovery and sharing.
